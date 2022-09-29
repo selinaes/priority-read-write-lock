@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 #include <dirent.h>
+#include <time.h>
 #define gettid() syscall(SYS_gettid)
 
 #include "rwlock.h"
@@ -89,26 +90,40 @@ Reader 3 releases the lock
 
 */
 
-void read_wstatus(int id){
+bool read_wstatus(int id, int expected){
+    clock_t before = clock();
     do{
+        // sched_yield();
+        clock_t difference = clock() - before;
+        if(difference *1000 / CLOCKS_PER_SEC > 1000){
+            return false;
+        }
         wfp[id] = fopen(wthread_name[id], "r");
         for(int i = 0; i < 3; i++){
             getline(&status, &len, wfp[id]);
         }    
-    }while(strcmp(status, sstate));
-    fclose(wfp[id]);
+        fclose(wfp[id]);
+        
+    }while(strcmp(status, sstate) || (w_state[id] != expected));
+    return true;
 }
 
-void read_rstatus(int id){
+bool read_rstatus(int id, int expected){
+    clock_t before = clock();
     do{
+        // sched_yield();
+        clock_t difference = clock() - before;
+        if(difference *1000 / CLOCKS_PER_SEC > 1000){
+            return false;
+        }
         rfp[id] = fopen(rthread_name[id], "r");
         for(int i = 0; i < 3; i++){
             getline(&status, &len, rfp[id]);
         }    
-    }while(strcmp(status, sstate));
-    fclose(rfp[id]);
+        fclose(rfp[id]);
+    }while(strcmp(status, sstate) || (r_state[id] != expected) );
+    return true;
 }
-
 bool run_tests(){
     pid_t pid = getpid();
     DIR * dir = opendir("/proc/");
@@ -132,65 +147,65 @@ bool run_tests(){
         }
     }
     
-    read_rstatus(0);
+    read_rstatus(0,0);
     // Reader 0 arrives
     pthread_cond_signal(&rcond[0]);
-    read_rstatus(0);
+    read_rstatus(0,1);
     if(r_state[0] != 1){
         printf("Reader 0 fails to acquire the lock!\n");
         return false;
     }
     // Reader 0 acquires the lock
-    read_rstatus(3);
+    read_rstatus(3,0);
     // Reader 3 arrives
     pthread_cond_signal(&rcond[3]);
-    read_rstatus(3);
+    read_rstatus(3,1);
     if(r_state[3] != 1){
         printf("Reader 3 fails to acquire the lock!\n");
         return false;
     }
     // Reader 3 acquires the lock
-    read_rstatus(1);
+    read_rstatus(1,0);
     // Reader 1 arrives
     pthread_cond_signal(&rcond[1]);
-    read_rstatus(1);
+    read_rstatus(1,1);
     if(r_state[1] != 1){
         printf("Reader 1 fails to acquire the lock!\n");
         return false;
     }
     // Reader 1 acquires the lock
     pthread_cond_signal(&rcond[0]);
-    read_rstatus(0);
+    read_rstatus(0,0);
     if(r_state[0] != 0){
         printf("Reader 0 fails to release the lock!\n");
         return false;
     }
     // Reader 0 releases the lock
-    read_rstatus(2);
+    read_rstatus(2,0);
     // Reader 2 arrives
     pthread_cond_signal(&rcond[2]);
-    read_rstatus(2);
+    read_rstatus(2,1);
     if(r_state[2] != 1){
         printf("Reader 2 fails to acquire the lock!\n");
         return false;
     }
     // Reader 2 acquires the lock
     pthread_cond_signal(&rcond[1]);
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] != 0){
         printf("Reader 1 fails to release the lock!\n");
         return false;
     }
     // Reader 1 releases the lock
     pthread_cond_signal(&rcond[2]);
-    read_rstatus(2);
+    read_rstatus(2,0);
     if(r_state[2] != 0){
         printf("Reader 2 fails to release the lock!\n");
         return false;
     }
     // Reader 2 releases the lock
     pthread_cond_signal(&rcond[3]);
-    read_rstatus(3);
+    read_rstatus(3,0);
     if(r_state[3] != 0){
         printf("Reader 3 fails to release the lock!\n");
         return false;

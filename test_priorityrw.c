@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 #include <dirent.h>
+#include <time.h>
 #define gettid() syscall(SYS_gettid)
 
 #include "rwlock.h"
@@ -116,24 +117,39 @@ Reader 2 releases the lock
 Reader 1 releases the lock
 */
 
-void read_wstatus(int id){
+bool read_wstatus(int id, int expected){
+    clock_t before = clock();
     do{
+        // sched_yield();
+        clock_t difference = clock() - before;
+        if(difference *1000 / CLOCKS_PER_SEC > 1000){
+            return false;
+        }
         wfp[id] = fopen(wthread_name[id], "r");
         for(int i = 0; i < 3; i++){
             getline(&status, &len, wfp[id]);
         }    
-    }while(strcmp(status, sstate));
-    fclose(wfp[id]);
+        fclose(wfp[id]);
+        
+    }while(strcmp(status, sstate) || (w_state[id] != expected));
+    return true;
 }
 
-void read_rstatus(int id){
+bool read_rstatus(int id, int expected){
+    clock_t before = clock();
     do{
+        // sched_yield();
+        clock_t difference = clock() - before;
+        if(difference *1000 / CLOCKS_PER_SEC > 1000){
+            return false;
+        }
         rfp[id] = fopen(rthread_name[id], "r");
         for(int i = 0; i < 3; i++){
             getline(&status, &len, rfp[id]);
         }    
-    }while(strcmp(status, sstate));
-    fclose(rfp[id]);
+        fclose(rfp[id]);
+    }while(strcmp(status, sstate) || (r_state[id] != expected) );
+    return true;
 }
 
 bool run_tests(){
@@ -160,247 +176,247 @@ bool run_tests(){
         }
     }
     
-    read_wstatus(1);
+    read_wstatus(1,0);
     // Writer 1 arrives
     pthread_cond_signal(&wcond[1]);
-    read_wstatus(1);
+    read_wstatus(1,1);
     if(w_state[1] != 1){
         printf("writer 1 fails to acquire the lock!\n");
         return false;
     }
     // Writer 1 acquires the lock
-    read_wstatus(0);
+    read_wstatus(0,0);
     // Writer 0 arrives
     pthread_cond_signal(&wcond[0]);
-    read_wstatus(3);
+    read_wstatus(3,0);
     // Writer 3 arrives
     pthread_cond_signal(&wcond[3]);
-    read_rstatus(1);
+    read_rstatus(1,0);
     // Reader 1 arrives
     pthread_cond_signal(&rcond[1]);
-    read_wstatus(7);
+    read_wstatus(7,0);
     // Writer 7 arrives
     pthread_cond_signal(&wcond[7]);
-    read_wstatus(0);
+    read_wstatus(0,0);
     if(w_state[0] == 1){
         printf("writer 0 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(3);
+    read_wstatus(3,0);
     if(w_state[3] == 1){
         printf("writer 3 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(7);
+    read_wstatus(7,0);
     if(w_state[7] == 1){
         printf("writer 7 wrongly acquires the lock!\n");
         return false;
     }
     pthread_cond_signal(&wcond[1]);
-    read_wstatus(1);
+    read_wstatus(1,0);
     if(w_state[1] != 0){
         printf("writer 1 fails to release the lock!\n");
         return false;
     }
     // Writer 1 releases the lock
-    read_wstatus(0);
+    read_wstatus(0,1);
     if(w_state[0] != 1){
         printf("writer 0 fails to acquire the lock!\n");
         return false;
     }
-    read_wstatus(3);
+    read_wstatus(3,0);
     if(w_state[3] == 1){
         printf("writer 3 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(7);
+    read_wstatus(7,0);
     if(w_state[7] == 1){
         printf("writer 7 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 0 acquires the lock
     pthread_cond_signal(&wcond[0]);
-    read_wstatus(0);
+    read_wstatus(0,0);
     if(w_state[0] != 0){
         printf("writer 0 fails to release the lock!\n");
         return false;
     }
     // Writer 0 releases the lock
-    read_wstatus(3);
+    read_wstatus(3,1);
     if(w_state[3] != 1){
         printf("writer 3 fails to acquire the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(7);
+    read_wstatus(7,0);
     if(w_state[7] == 1){
         printf("writer 7 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 3 acquires the lock
-    read_rstatus(0);
+    read_rstatus(0,0);
     pthread_cond_signal(&rcond[0]);
-    read_rstatus(0);
+    read_rstatus(0,0);
     if(r_state[0] == 1){
         printf("reader 0 wrongly acquires the lock!\n");
         return false;
     }
     // Reader 1 arrives
     pthread_cond_signal(&wcond[3]);
-    read_wstatus(3);
+    read_wstatus(3,0);
     if(w_state[3] != 0){
         printf("writer 3 fails to release the lock!\n");
         return false;
     }
     // Writer 3 releases the lock
-    read_wstatus(7);
+    read_wstatus(7,1);
     if(w_state[7] != 1){
         printf("writer 7 fails to acquire the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(0);
+    read_rstatus(0,0);
     if(r_state[0] == 1){
         printf("reader 0 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 7 acquires the lock
-    read_wstatus(8);
+    read_wstatus(8,0);
     pthread_cond_signal(&wcond[8]);
-    read_wstatus(8);
+    read_wstatus(8,0);
     if(w_state[8] == 1){
         printf("writer 8 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 8 arrives
     pthread_cond_signal(&wcond[7]);
-    read_wstatus(7);
+    read_wstatus(7,0);
     if(w_state[7] != 0){
         printf("writer 7 fails to release the lock!\n");
         return false;
     }
     // Writer 7 releases the lock
-    read_wstatus(8);
+    read_wstatus(8,1);
     if(w_state[8] != 1){
         printf("writer 8 fails to acquire the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(0);
+    read_rstatus(0,0);
     if(r_state[0] == 1){
         printf("reader 0 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 8 acquires the lock
     pthread_cond_signal(&wcond[8]);
-    read_wstatus(8);
+    read_wstatus(8,0);
     if(w_state[8] != 0){
         printf("writer 8 fails to release the lock!\n");
         return false;
     }
     // Writer 8 releases the lock
-    read_rstatus(0);
+    read_rstatus(0,1);
     if(r_state[0] != 1){
         printf("reader 0 fails to acquire the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,1);
     if(r_state[1] != 1){
         printf("reader 1 fails to acquire the lock!\n");
         return false;
     }
     // Reader 0 & 1 acquires the lock
-    read_wstatus(6);
+    read_wstatus(6,0);
     pthread_cond_signal(&wcond[6]);
-    read_wstatus(6);
+    read_wstatus(6,0);
     if(w_state[6] == 1){
         printf("writer 6 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 6 arrives
-    read_rstatus(2);
+    read_rstatus(2,0);
     pthread_cond_signal(&rcond[2]);
-    read_rstatus(2);
+    read_rstatus(2,0);
     if(r_state[2] == 1){
         printf("reader 2 wrongly acquires the lock!\n");
         return false;
     }
     // Reader 2 arrives
-    read_wstatus(4);
+    read_wstatus(4,0);
     pthread_cond_signal(&wcond[4]);
-    read_wstatus(4);
+    read_wstatus(4,0);
     if(w_state[4] == 1){
         printf("writer 4 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 4 arrives
-    read_wstatus(5);
+    read_wstatus(5,0);
     pthread_cond_signal(&wcond[5]);
-    read_wstatus(5);
+    read_wstatus(5,0);
     if(w_state[5] == 1){
         printf("writer 5 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 5 arrives
     pthread_cond_signal(&rcond[1]);
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] != 0){
         printf("reader 1 fails to release the lock!\n");
         return false;
     }
-    read_wstatus(4);
+    read_wstatus(4,0);
     if(w_state[4] == 1){
         printf("writer 4 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(5);
+    read_wstatus(5,0);
     if(w_state[5] == 1){
         printf("writer 5 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(6);
+    read_wstatus(6,0);
     if(w_state[6] == 1){
         printf("writer 6 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(2);
+    read_rstatus(2,0);
     if(r_state[2] == 1){
         printf("reader 2 wrongly acquires the lock!\n");
         return false;
     }
     // Reader 1 releases the lock
     pthread_cond_signal(&rcond[0]);
-    read_rstatus(0);
+    read_rstatus(0,0);
     if(r_state[0] != 0){
         printf("reader 0 fails to release the lock!\n");
         return false;
     }
     // Reader 0 releases the lock
     int curr;
-    read_wstatus(4);
-    read_wstatus(5);
+    bool r4 = read_wstatus(4,1);
+    bool r5 = read_wstatus(5,1);
     if(w_state[4] == 1){
         if(w_state[5] == 1){
             printf("writer 4 and 5 wrongly acquires the lock at the same time!\n");
@@ -415,33 +431,33 @@ bool run_tests(){
         printf("writer 4 or 5 fails to acquire the lock!\n");
         return false;
     }
-    read_wstatus(6);
+    read_wstatus(6,0);
     if(w_state[6] == 1){
         printf("writer 6 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(2);
+    read_rstatus(2,0);
     if(r_state[2] == 1){
         printf("reader 2 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 4/5 acquires the lock
     pthread_cond_signal(&wcond[2]);
-    read_wstatus(2);
+    read_wstatus(2,0);
     if(w_state[2] == 1){
         printf("writer 2 wrongly acquires the lock!\n");
         return false;
     }
     // Writer 2 arrives
     pthread_cond_signal(&rcond[1]);
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
     // Reader 1 arrives 
     pthread_cond_signal(&wcond[curr]);
-    read_wstatus(curr);
+    read_wstatus(curr,0);
     if(w_state[curr] != 0){
         printf("writer %d fails to release the lock!\n", curr);
         return false;
@@ -452,111 +468,111 @@ bool run_tests(){
     else curr = 4;
     
     // Writer 4/5 releases the lock
-    read_wstatus(curr);
+    read_wstatus(curr,0);
     if(w_state[curr] == 1){
         printf("writer %d wrongly acquires the lock!\n", curr);
         return false;
     }
-    read_wstatus(6);
+    read_wstatus(6,0);
     if(w_state[6] == 1){
         printf("writer 6 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(2);
+    read_rstatus(2,0);
     if(r_state[2] == 1){
         printf("reader 2 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(2);
+    read_wstatus(2,1);
     if(w_state[2] != 1){
         printf("writer 2 fails to acquire the lock!\n");
         return false;
     }
     // Writer 2 acquires the lock
     pthread_cond_signal(&wcond[2]);
-    read_wstatus(2);
+    read_wstatus(2,0);
     if(w_state[2] != 0){
         printf("writer 2 fails to release the lock!\n");
         return false;
     }
     // Writer 2 releases the lock
-    read_wstatus(6);
+    read_wstatus(6,0);
     if(w_state[6] == 1){
         printf("writer 6 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(2);
+    read_rstatus(2,0);
     if(r_state[2] == 1){
         printf("reader 2 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(curr);
+    read_wstatus(curr,1);
     if(w_state[curr] != 1){
         printf("writer %d fails to acquire the lock!\n", curr);
         return false;
     }
     // Writer 5/4 acquires the lock
     pthread_cond_signal(&wcond[curr]);
-    read_wstatus(curr);
+    read_wstatus(curr,0);
     if(w_state[curr] != 0){
         printf("writer %d fails to release the lock!\n", curr);
         return false;
     }
     // Writer 5/4 releases the lock
-    read_rstatus(2);
+    read_rstatus(2,0);
     if(r_state[2] == 1){
         printf("reader 2 wrongly acquires the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] == 1){
         printf("reader 1 wrongly acquires the lock!\n");
         return false;
     }
-    read_wstatus(6);
+    read_wstatus(6,1);
     if(w_state[6] != 1){
         printf("writer 6 fails to acquire the lock!\n");
         return false;
     }
     // Writer 6 acquires the lock
     pthread_cond_signal(&wcond[6]);
-    read_wstatus(6);
+    read_wstatus(6,0);
     if(w_state[6] != 0){
         printf("writer 6 fails to release the lock!\n");
         return false;
     }
     // Writer 6 releases the lock
-    read_rstatus(2);
+    read_rstatus(2,1);
     if(r_state[2] != 1){
         printf("reader 2 fails to acquire the lock!\n");
         return false;
     }
-    read_rstatus(1);
+    read_rstatus(1,1);
     if(r_state[1] != 1){
         printf("reader 1 fails to acquire the lock!\n");
         return false;
     }
     // Reader 1 & 2 acquires the lock
     pthread_cond_signal(&rcond[2]);
-    sched_yield();
-    read_rstatus(2);
+    
+    read_rstatus(2,0);
     if(r_state[2] != 0){
         printf("reader 2 fails to release the lock!\n");
         return false;
     }
     // Reader 2 releases the lock
     pthread_cond_signal(&rcond[1]);
-    read_rstatus(1);
+    read_rstatus(1,0);
     if(r_state[1] != 0){
         printf("reader 1 fails to release the lock!\n");
         return false;
