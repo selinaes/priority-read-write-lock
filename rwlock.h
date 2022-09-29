@@ -4,7 +4,7 @@
 typedef struct {
 	pthread_mutex_t     mutex;
 	pthread_cond_t      r_cond;
-	pthread_cond_t      w_cond;
+	pthread_cond_t      w_cond[3];
 	int                 r_active;
 	int                 w_active[3];
 	int                 r_wait;
