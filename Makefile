@@ -48,5 +48,8 @@ test_priorityrw: test_priorityrw.c rwlock.o
 rwlock.o: rwlock.c rwlock.h
 	$(CC) $(CFLAGS) -c rwlock.c
 
+gradescope:
+	zip submission.zip rwlock.c rwlock.h
+
 clean:
 	rm -rf *.o ${EXECUTABLES} *.dSYM a.out 
