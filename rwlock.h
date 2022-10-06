@@ -1,6 +1,8 @@
 #ifndef RWLOCK_H
 #define RWLOCK_H
 
+#include <pthread.h>
+
 typedef struct {
 	pthread_mutex_t     mutex;
 	pthread_cond_t      r_cond;
