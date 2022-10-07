@@ -56,9 +56,12 @@ void Pthread_cond_broadcast(pthread_cond_t *cond){
 }
 
 bool check_all_zeros(int arr[3]){
-	int zeros[3];
-	memset(zeros, 0, 3);
-	return (memcmp(arr,zeros,3)==0);
+	for (int i=0; i<3; i++){
+		if (arr[i] != 0){
+			return false;
+		}
+	}
+	return true;
 }
 
 
@@ -69,15 +72,22 @@ rwl_rlock(rwl *l)
 	Pthread_mutex_lock(&l->mutex);
 	// if any writer active/writer waiting, wait for reading condition
 	while (!check_all_zeros(l->w_active) || !check_all_zeros(l->w_wait)){
-		l->r_wait++; //感觉可能有问题，比如被错误唤醒之后，又加了一次自己
+		l->r_wait++; 
 		Pthread_cond_wait(&l->r_cond, &l->mutex); //put self to sleep, onto r_cond queue
 	}
 	// othersies, successfully grab and read; 
-	// l->r_wait--; //decrement waiting reader count
 	l->r_active++; //increment active reader count
 	Pthread_mutex_unlock(&l->mutex);
 }
 
+int highest_wait_priority(rwl *l){
+	for (int i=0; i<3; i++){
+		if (l->w_wait[i]){
+			return i;
+		}
+	}
+	return -1;
+}
 
 //rwl_runlock unlocks the lock held in the "read" mode
 void
@@ -85,14 +95,12 @@ rwl_runlock(rwl *l)
 {
 	Pthread_mutex_lock(&l->mutex);
 	assert(check_all_zeros(l->w_active)); // &&"shouldn't have active writer at runlock"
-	assert(l->r_wait==0 ); //&&"shouldn't have waiting reader at runlock"
 	// decrement active reader count
 	l->r_active--;
 	if (l->r_active == 0) {
-		for (int i=0; i<3; i++){
-			l->w_wait[i] = 0; // clear wait count for about-to-awake writers
-			Pthread_cond_broadcast(&l->w_cond[i]); // wake all waiting writer threads
-		}
+		int highest_wait = highest_wait_priority(l);
+		l->w_wait[highest_wait] = 0;
+		Pthread_cond_broadcast(&l->w_cond[highest_wait]);
 	}
 	Pthread_mutex_unlock(&l->mutex);
 }
@@ -129,10 +137,11 @@ rwl_wlock(rwl *l, int priority)
 		Pthread_cond_wait(&l->w_cond[priority], &l->mutex);
 	}
 	// successfully grab and set active
-	// l->w_wait[priority]--; //decrement waiting writer count
 	l->w_active[priority]++; //increment active writer count
 	Pthread_mutex_unlock(&l->mutex);
 }
+
+
 
 //rwl_wunlock unlocks the lock held in the "write" mode
 void
@@ -143,18 +152,11 @@ rwl_wunlock(rwl *l, int priority)
 	assert(l->r_active==0); // &&"shouldn't have active reader at wunlock"
 	l->w_active[priority]--;   // decrement corresponding active writer count
 
-	bool has_wait_w = false;
-	for (int i=0; i<3; i++){
-		if (l->w_wait[i]){
-			has_wait_w = true;
-		}
-	}
+	int highest_wait = highest_wait_priority(l);
 
-	if (has_wait_w){
-		for (int i=0; i<3; i++){
-			l->w_wait[i] = 0;
-			Pthread_cond_broadcast(&l->w_cond[i]);
-		}
+	if (highest_wait > -1){
+		l->w_wait[highest_wait] = 0;
+		Pthread_cond_broadcast(&l->w_cond[highest_wait]);
 	} else {
 		l->r_wait = 0;
 		Pthread_cond_broadcast(&l->r_cond);
