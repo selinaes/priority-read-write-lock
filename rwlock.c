@@ -51,13 +51,13 @@ void Pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex){
 }
 
 void Pthread_cond_broadcast(pthread_cond_t *cond){
-	int rc = Pthread_cond_broadcast(cond);
+	int rc = pthread_cond_broadcast(cond);
 	assert (rc == 0);
 }
 
 bool check_all_zeros(int arr[3]){
 	int zeros[3];
-	zeros = [0, 0, 0];
+	memset(zeros, 0, 3);
 	return (memcmp(arr,zeros,3)==0);
 }
 
@@ -68,7 +68,7 @@ rwl_rlock(rwl *l)
 {
 	Pthread_mutex_lock(&l->mutex);
 	// if any writer active/writer waiting, wait for reading condition
-	while (!check_all_zeros(l->w_active) || !memcmp(l->w_wait,[0,0,0],3)==0){
+	while (!check_all_zeros(l->w_active) || !check_all_zeros(l->w_wait)){
 		l->r_wait++; //感觉可能有问题，比如被错误唤醒之后，又加了一次自己
 		Pthread_cond_wait(&l->r_cond, &l->mutex); //put self to sleep, onto r_cond queue
 	}
@@ -84,7 +84,7 @@ void
 rwl_runlock(rwl *l)
 {
 	Pthread_mutex_lock(&l->mutex);
-	assert(memcmp(l->w_active,[0,0,0],3==0)); // &&"shouldn't have active writer at runlock"
+	assert(check_all_zeros(l->w_active)); // &&"shouldn't have active writer at runlock"
 	assert(l->r_wait==0 ); //&&"shouldn't have waiting reader at runlock"
 	// decrement active reader count
 	l->r_active--;
@@ -99,7 +99,7 @@ rwl_runlock(rwl *l)
 
 
 
-bool check_can_write(int priority){
+bool check_can_write(rwl *l, int priority){
 	for (int i=0; i<priority; i++){
 		if (l->w_wait[i]){
 			return false;
@@ -124,7 +124,7 @@ rwl_wlock(rwl *l, int priority)
 	// while higher priority writer waiting, or any writer active, 
 	// or any active reader
 	// put self to respective priority w_wait & w_cond queue
-	while (!check_can_write(priority)){
+	while (!check_can_write(l, priority)){
 	    l->w_wait[priority]++;
 		Pthread_cond_wait(&l->w_cond[priority], &l->mutex);
 	}
